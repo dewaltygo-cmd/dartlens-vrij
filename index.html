@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#101714">
+<title>DartLens Vrij</title>
+<style>
+:root{color-scheme:dark;--bg:#101714;--panel:#1a2420;--green:#a8ff60;--muted:#a9b6ae;--red:#ff625d}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:#f5f7f5;font:16px system-ui,-apple-system,sans-serif}
+header{padding:20px 18px 12px;background:#141d18;position:sticky;top:0;z-index:2;border-bottom:1px solid #2d3932}
+h1{font-size:23px;margin:0}header p{margin:4px 0 0;color:var(--muted);font-size:13px}
+main{padding:14px;max-width:760px;margin:auto;display:grid;gap:14px}
+.card{background:var(--panel);border:1px solid #2c3a32;border-radius:16px;padding:14px}
+.row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.between{justify-content:space-between}
+button,select,input{font:inherit;border-radius:11px;border:1px solid #405147;background:#26332b;color:white;padding:11px 13px}
+button{cursor:pointer;font-weight:650}button.primary{background:var(--green);color:#14200f;border-color:var(--green)}button:disabled{opacity:.45}
+video{width:100%;max-height:52vh;object-fit:contain;background:#080b09;border-radius:12px;display:block}
+#stage{position:relative}#overlay{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+.score{font-size:38px;font-weight:800;letter-spacing:-1px}.muted{color:var(--muted);font-size:13px}.pill{border-radius:999px;padding:5px 9px;background:#26352b;color:var(--green);font-size:12px}
+#throws{display:grid;gap:7px;margin-top:10px}.throw{display:flex;justify-content:space-between;padding:9px 10px;border-radius:9px;background:#111a15}
+#message{color:var(--green);min-height:20px;font-size:14px}
+label{font-size:13px;color:var(--muted);display:block;margin-bottom:5px}
+input[type=number]{width:90px}
+.small{font-size:12px;color:var(--muted);line-height:1.45}
+footer{padding:4px 14px 24px;text-align:center;color:var(--muted);font-size:12px}
+</style>
+</head>
+<body>
+<header><h1>🎯 DartLens Vrij</h1><p>Gratis prototype • iPhone-camera • steeltip • geen abonnement</p></header>
+<main>
+<section class="card">
+ <div class="row between"><strong>Camera</strong><span class="pill">Prototype</span></div>
+ <div id="stage" style="margin-top:12px"><video id="video" autoplay playsinline muted></video><canvas id="overlay"></canvas></div>
+ <div class="row" style="margin-top:10px">
+  <button class="primary" id="start">Start camera</button><button id="stop" disabled>Stop</button>
+  <button id="snap" disabled>Bevries beeld</button>
+ </div>
+ <p class="small">Zet je iPhone stevig neer, recht tegenover het bord en met het hele bord zichtbaar. Gebruik bij voorkeur goed, gelijkmatig licht.</p>
+</section>
+<section class="card">
+ <strong>1. Kalibreer het bord</strong>
+ <p class="muted">Tik op het midden van de bull en daarna op de buitenrand van de dubbele ring (ongeveer op 12 uur). Tik op de camerabeeldweergave.</p>
+ <div class="row">
+  <button id="centerBtn">Tik daarna op bull</button>
+  <button id="radiusBtn">Tik daarna op buitenrand</button>
+  <button id="resetCal">Wis kalibratie</button>
+ </div>
+ <p id="calStatus" class="muted">Nog niet gekalibreerd.</p>
+</section>
+<section class="card">
+ <div class="row between"><strong>2. Score tellen</strong><span class="muted">Tik op de punt van de dart</span></div>
+ <p class="small">Deze eerste versie berekent de score op basis van de plek die je aantikt. Automatische herkenning van de dartpunt is nog niet ingebouwd.</p>
+ <div class="row" style="margin-top:8px">
+  <label>Spel<select id="game"><option value="501">501</option><option value="301">301</option></select></label>
+  <label>Speler<select id="player"><option>Speler 1</option><option>Speler 2</option></select></label>
+  <label>Startscore<input type="number" id="startScore" min="1" max="999" value="501"></label>
+ </div>
+ <div class="row between" style="margin-top:10px"><div><div class="muted">Resterend</div><div class="score" id="remaining">501</div></div><div><div class="muted">Laatste worp</div><div class="score" id="lastScore">—</div></div></div>
+ <div class="row" style="margin-top:8px"><button class="primary" id="undo">Ongedaan maken</button><button id="nextVisit">Nieuwe beurt</button><button id="resetGame">Nieuw spel</button></div>
+ <div id="message">Kalibreer eerst het bord om scores te berekenen.</div>
+ <div id="throws"></div>
+</section>
+<section class="card">
+ <strong>Hoe de score wordt berekend</strong>
+ <p class="small">De app gebruikt de bull als middelpunt en de ingestelde buitenrand als schaal. De hoek bepaalt het vaknummer volgens de standaard dartbordvolgorde; de afstand bepaalt single, double of triple. Kalibratie is een benadering en de score kan afwijken als het bord scheef staat of de tikpositie niet precies op de dartpunt ligt.</p>
+</section>
+</main>
+<footer>Lokale demo: scores blijven in deze pagina en worden niet naar een server gestuurd.</footer>
+<script>
+const video=document.querySelector('#video'), canvas=document.querySelector('#overlay'), ctx=canvas.getContext('2d');
+const start=document.querySelector('#start'), stop=document.querySelector('#stop'), snap=document.querySelector('#snap');
+let stream=null, frozen=false, mode='none', center=null, outer=null, throws=[], remaining=501, turnScores=[], activePlayer='Speler 1';
+const order=[20,1,18,4,13,6,10,15,2,17,3,19,7,16,8,11,14,9,12,5];
+function fitCanvas(){const r=video.getBoundingClientRect();canvas.width=Math.max(1,Math.round(r.width*devicePixelRatio));canvas.height=Math.max(1,Math.round(r.height*devicePixelRatio));canvas.style.width=r.width+'px';canvas.style.height=r.height+'px';drawOverlay();}
+function pointFromEvent(e){const r=video.getBoundingClientRect();return {x:(e.clientX-r.left)/r.width,y:(e.clientY-r.top)/r.height};}
+function drawOverlay(){ctx.clearRect(0,0,canvas.width,canvas.height);if(!center)return;const sx=canvas.width,sy=canvas.height;ctx.lineWidth=2*devicePixelRatio;ctx.strokeStyle='#a8ff60';ctx.fillStyle='#a8ff60';ctx.beginPath();ctx.arc(center.x*sx,center.y*sy,5*devicePixelRatio,0,Math.PI*2);ctx.stroke();if(outer){const radius=Math.hypot((outer.x-center.x)*sx,(outer.y-center.y)*sy);ctx.beginPath();ctx.arc(center.x*sx,center.y*sy,radius,0,Math.PI*2);ctx.stroke();}throws.forEach(t=>{ctx.beginPath();ctx.arc(t.x*sx,t.y*sy,4*devicePixelRatio,0,Math.PI*2);ctx.fill();});}
+video.addEventListener('loadedmetadata',fitCanvas);window.addEventListener('resize',fitCanvas);
+start.onclick=async()=>{try{stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1920},height:{ideal:1080}},audio:false});video.srcObject=stream;frozen=false;video.play();start.disabled=true;stop.disabled=false;snap.disabled=false;document.querySelector('#message').textContent='Camera gestart. Kalibreer het bord.';}catch(e){document.querySelector('#message').textContent='Camera niet gestart. Open deze pagina via HTTPS en geef cameratoegang.';}};
+stop.onclick=()=>{if(stream)stream.getTracks().forEach(t=>t.stop());stream=null;video.srcObject=null;start.disabled=false;stop.disabled=true;snap.disabled=true;};
+snap.onclick=()=>{if(!frozen){const c=document.createElement('canvas');c.width=video.videoWidth;c.height=video.videoHeight;c.getContext('2d').drawImage(video,0,0);video.pause();video.poster=c.toDataURL('image/jpeg');frozen=true;snap.textContent='Livebeeld hervatten';}else{video.play();video.removeAttribute('poster');frozen=false;snap.textContent='Bevries beeld';}};
+video.addEventListener('click',handleTap);
+function handleTap(e){if(!stream){document.querySelector('#message').textContent='Start eerst de camera.';return;}const p=pointFromEvent(e);if(mode==='center'){center=p;mode='none';document.querySelector('#calStatus').textContent='Bull ingesteld. Stel nu de buitenrand in.';}else if(mode==='outer'){outer=p;mode='none';document.querySelector('#calStatus').textContent='Kalibratie ingesteld. Tik op de punt van een dart om de score te bepalen.';}else{if(!center||!outer){document.querySelector('#message').textContent='Kalibreer eerst bull en buitenrand.';return;}const result=scoreAt(p);if(!result){document.querySelector('#message').textContent='Controleer de kalibratie en probeer opnieuw.';return;}addThrow({...p,...result,player:document.querySelector('#player').value});}drawOverlay();}
+document.querySelector('#centerBtn').onclick=()=>{mode='center';document.querySelector('#calStatus').textContent='Tik op het bullseye in het camerabeeld.';};
+document.querySelector('#radiusBtn').onclick=()=>{if(!center){document.querySelector('#calStatus').textContent='Stel eerst het bull-middelpunt in.';return;}mode='outer';document.querySelector('#calStatus').textContent='Tik op de buitenrand van de dubbele ring, liefst recht boven de bull.';};
+document.querySelector('#resetCal').onclick=()=>{center=outer=null;mode='none';document.querySelector('#calStatus').textContent='Nog niet gekalibreerd.';drawOverlay();};
+function scoreAt(p){const r=Math.hypot((p.x-center.x)*video.clientWidth,(p.y-center.y)*video.clientHeight);const R=Math.hypot((outer.x-center.x)*video.clientWidth,(outer.y-center.y)*video.clientHeight);if(!R)return null;const ratio=r/R;let mult=1, label='S';if(ratio>1)return {score:0,label:'Mis',sector:0};if(ratio<=0.045)return {score:50,label:'Bull',sector:25};if(ratio<=0.105)return {score:25,label:'Outer bull',sector:25};if(ratio>=0.90&&ratio<=1){mult=2;label='D';}else if(ratio>=0.49&&ratio<=0.56){mult=3;label='T';}const dx=(p.x-center.x)*video.clientWidth,dy=(p.y-center.y)*video.clientHeight;let deg=(Math.atan2(dx,-dy)*180/Math.PI+360)%360;const idx=Math.round(deg/18)%20;const sector=order[idx];return {score:sector*mult,label:label+sector,sector};}
+function addThrow(t){const startScore=Number(document.querySelector('#startScore').value)||501;if(throws.length===0)remaining=startScore;const newRemain=remaining-t.score;if(newRemain<0||newRemain===1){document.querySelector('#message').textContent='Bust! De beurt telt niet; resterende score blijft '+remaining+'.';t.bust=true;}else{remaining=newRemain;document.querySelector('#message').textContent=t.label+' = '+t.score+' punten';}throws.push(t);turnScores.push(t.score);render();}
+function render(){document.querySelector('#remaining').textContent=remaining;document.querySelector('#lastScore').textContent=throws.length?throws[throws.length-1].score:'—';const box=document.querySelector('#throws');box.innerHTML='';throws.slice().reverse().forEach((t,i)=>{const d=document.createElement('div');d.className='throw';d.innerHTML='<span>'+t.player+' · '+t.label+'</span><strong>'+t.score+' punten</strong>';box.appendChild(d);});drawOverlay();}
+document.querySelector('#undo').onclick=()=>{if(!throws.length)return;throws.pop();remaining=Number(document.querySelector('#startScore').value)||501;for(const t of throws){if(!t.bust)remaining-=t.score;}document.querySelector('#message').textContent='Laatste worp verwijderd.';render();};
+document.querySelector('#nextVisit').onclick=()=>{turnScores=[];document.querySelector('#message').textContent='Nieuwe beurt. Tik de volgende dartpunten aan.';};
+document.querySelector('#resetGame').onclick=()=>{throws=[];remaining=Number(document.querySelector('#startScore').value)||501;turnScores=[];document.querySelector('#message').textContent='Nieuw spel gestart.';render();};
+document.querySelector('#game').onchange=e=>{document.querySelector('#startScore').value=e.target.value;document.querySelector('#resetGame').click();};
+document.querySelector('#startScore').onchange=e=>{remaining=Number(e.target.value)||501;render();};
+document.querySelector('#player').onchange=e=>activePlayer=e.target.value;
+</script>
+</body>
+</html>
